@@ -1,0 +1,274 @@
+-- ============================================
+-- AUTO TWEEN SCRIPT FOR DELTA EXECUTOR
+-- ============================================
+-- Cara pakai:
+-- 1. Inject script ini ke Delta
+-- 2. Script akan otomatis connect ke API
+-- 3. Kontrol via dashboard di browser
+-- ============================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+-- ========== KONFIGURASI ==========
+local CONFIG = {
+    API_URL = "http://ez.mn/tmpl/feeds/feed/tween/tween_control.php", -- GANTI DENGAN URL WEB-MU
+    CHECK_INTERVAL = 1.5, -- Detik (semakin kecil semakin responsif)
+    DEFAULT_TWEEN_SPEED = 3, -- Detik (default speed)
+    MIN_SPEED = 0.5,
+    MAX_SPEED = 10,
+    EASING_STYLE = "Linear", -- Linear, Quad, Sine, Bounce, dll
+    EASING_DIRECTION = "Out", -- In, Out, InOut
+    ENABLE_DEBUG = true, -- Tampilkan log di console
+}
+
+-- ========== VARIABEL GLOBAL ==========
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+local currentTween = nil
+local isMoving = false
+local lastCommand = nil
+local tweenSpeed = CONFIG.DEFAULT_TWEEN_SPEED
+local isPaused = false
+
+-- ========== DEBUG FUNCTION ==========
+function debugLog(msg)
+    if CONFIG.ENABLE_DEBUG then
+        print("[AutoTween] " .. msg)
+    end
+end
+
+-- ========== GET EASING STYLE ==========
+function getEasingStyle(styleName)
+    local styles = {
+        Linear = Enum.EasingStyle.Linear,
+        Quad = Enum.EasingStyle.Quad,
+        Sine = Enum.EasingStyle.Sine,
+        Cubic = Enum.EasingStyle.Cubic,
+        Quint = Enum.EasingStyle.Quint,
+        Circle = Enum.EasingStyle.Circle,
+        Bounce = Enum.EasingStyle.Bounce,
+        Back = Enum.EasingStyle.Back,
+        Elastic = Enum.EasingStyle.Elastic
+    }
+    return styles[styleName] or Enum.EasingStyle.Linear
+end
+
+function getEasingDirection(dirName)
+    local dirs = {
+        In = Enum.EasingDirection.In,
+        Out = Enum.EasingDirection.Out,
+        InOut = Enum.EasingDirection.InOut
+    }
+    return dirs[dirName] or Enum.EasingDirection.Out
+end
+
+-- ========== TWEEN FUNCTION ==========
+function tweenToPosition(targetPos, speed)
+    if not humanoid or not rootPart then
+        debugLog("Character not found!")
+        return false
+    end
+    
+    if isPaused then
+        debugLog("Movement paused")
+        return false
+    end
+    
+    -- Hentikan tween sebelumnya
+    if currentTween and currentTween.PlaybackState ~= Enum.PlaybackState.Completed then
+        currentTween:Cancel()
+        currentTween = nil
+    end
+    
+    -- Validasi posisi
+    if type(targetPos) ~= "table" then
+        debugLog("Invalid position format")
+        return false
+    end
+    
+    local x = targetPos.x or 0
+    local y = targetPos.y or 0
+    local z = targetPos.z or 0
+    
+    -- Cek apakah sudah di posisi target (toleransi 1 stud)
+    local currentPos = rootPart.Position
+    local distance = (Vector3.new(x, y, z) - currentPos).Magnitude
+    if distance < 1 then
+        debugLog("Already at target position")
+        return true
+    end
+    
+    -- Gunakan speed dari parameter atau default
+    local duration = speed or tweenSpeed
+    duration = math.clamp(duration, CONFIG.MIN_SPEED, CONFIG.MAX_SPEED)
+    
+    -- Buat tween
+    local tweenInfo = TweenInfo.new(
+        duration,
+        getEasingStyle(CONFIG.EASING_STYLE),
+        getEasingDirection(CONFIG.EASING_DIRECTION),
+        0, -- repeat count
+        false, -- reverses
+        0 -- delay
+    )
+    
+    local targetCFrame = CFrame.new(Vector3.new(x, y, z))
+    
+    currentTween = TweenService:Create(rootPart, tweenInfo, {
+        CFrame = targetCFrame
+    })
+    
+    isMoving = true
+    debugLog(string.format("Moving to (%.1f, %.1f, %.1f) in %.1f seconds", x, y, z, duration))
+    
+    currentTween:Play()
+    
+    currentTween.Completed:Connect(function()
+        isMoving = false
+        currentTween = nil
+        debugLog("Arrived at destination")
+    end)
+    
+    return true
+end
+
+-- ========== STOP TWEEN ==========
+function stopTween()
+    if currentTween then
+        currentTween:Cancel()
+        currentTween = nil
+        isMoving = false
+        debugLog("Movement stopped")
+        return true
+    end
+    return false
+end
+
+-- ========== PAUSE/RESUME ==========
+function togglePause()
+    isPaused = not isPaused
+    if isPaused then
+        if currentTween then
+            currentTween:Pause()
+        end
+        debugLog("Movement paused")
+    else
+        if currentTween then
+            currentTween:Play()
+        end
+        debugLog("Movement resumed")
+    end
+    return isPaused
+end
+
+-- ========== GET STATUS ==========
+function getStatus()
+    return {
+        isMoving = isMoving,
+        isPaused = isPaused,
+        speed = tweenSpeed,
+        currentPosition = rootPart and rootPart.Position or nil,
+        lastCommand = lastCommand
+    }
+end
+
+-- ========== CHECK COMMAND FROM API ==========
+function checkCommand()
+    local success, response = pcall(function()
+        return HttpService:GetAsync(CONFIG.API_URL)
+    end)
+    
+    if not success then
+        return false
+    end
+    
+    if not response or response == "" then
+        return false
+    end
+    
+    local data = HttpService:JSONDecode(response)
+    if not data then
+        return false
+    end
+    
+    -- Proses perintah
+    local command = data.command or "none"
+    
+    -- Update speed jika ada
+    if data.speed then
+        tweenSpeed = math.clamp(data.speed, CONFIG.MIN_SPEED, CONFIG.MAX_SPEED)
+        debugLog("Speed updated to: " .. tweenSpeed)
+    end
+    
+    -- Update easing style
+    if data.easing_style then
+        CONFIG.EASING_STYLE = data.easing_style
+        debugLog("Easing style: " .. CONFIG.EASING_STYLE)
+    end
+    
+    if command == "move" then
+        local x = data.x or 0
+        local y = data.y or 0
+        local z = data.z or 0
+        local speed = data.speed or tweenSpeed
+        
+        lastCommand = {x = x, y = y, z = z, speed = speed}
+        tweenToPosition({x = x, y = y, z = z}, speed)
+        
+    elseif command == "stop" then
+        stopTween()
+        
+    elseif command == "pause" then
+        togglePause()
+        
+    elseif command == "resume" then
+        if isPaused then
+            togglePause()
+        end
+        
+    elseif command == "teleport" then
+        local x = data.x or 0
+        local y = data.y or 0
+        local z = data.z or 0
+        
+        if rootPart then
+            rootPart.CFrame = CFrame.new(Vector3.new(x, y, z))
+            debugLog(string.format("Teleported to (%.1f, %.1f, %.1f)", x, y, z))
+        end
+        
+    elseif command == "status" then
+        -- Kirim status kembali ke API (optional)
+        local statusData = getStatus()
+        pcall(function()
+            HttpService:PostAsync(CONFIG.API_URL .. "?status=1", 
+                HttpService:JSONEncode(statusData))
+        end)
+    end
+    
+    return true
+end
+
+-- ========== KEYBIND (Untuk kontrol langsung di game) ==========
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    -- Klik kiri + shift: stop movement
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and 
+       UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+        stopTween()
+        debugLog("Movement stopped via keybind")
+    end
+    
+    -- Tombol P: pause/resume
+    if input.KeyCode == Enum.KeyCode.P then
+        togglePause()
+    end
+    
+    -- Tombol +/-
