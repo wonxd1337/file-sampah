@@ -80,14 +80,19 @@ def main():
     while True:
         packages = get_roblox_packages()
         
-        # 1. Ambil instruksi terbaru dari Website
+                # 1. Ambil instruksi terbaru dari Website
         try:
             req = requests.get(WEB_API_GET, timeout=10)
             commands = req.json()
+            
+            # TAMBAHKAN 2 BARIS INI: 
+            # Jika JSON dari web terbaca sebagai list ([]), paksa menjadi dictionary ({})
+            if isinstance(commands, list):
+                commands = {}
+                
         except:
             commands = {}
-            
-        current_status = {}
+
 
         # 2. Proses eksekusi untuk setiap akun
         for pkg in packages:
