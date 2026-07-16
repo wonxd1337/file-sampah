@@ -10,7 +10,7 @@ if not api_key:
     print("Jalankan: export GEMINI_API_KEY='isi_key_anda'")
     exit()
 
-url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key={api_key}"
+url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
 
 # Menyimpan riwayat obrolan agar AI tidak pelupa
 history = []
