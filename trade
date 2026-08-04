@@ -1,0 +1,354 @@
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local USERNAME = LocalPlayer.Name
+local API_URL = "http://ez.mn/tmpl/feeds/feed/rob/api.php"
+
+print("========================================")
+print("  ðŸŽ£ GHOST AUTO TRADE BOT v2.0")
+print("  Akun: " .. USERNAME)
+print("========================================")
+
+-- ============================================================
+-- HTTP HELPERS
+-- ============================================================
+local function apiGet(action, extraParams)
+    local url = API_URL .. "?action=" .. action .. "&username=" .. HttpService:UrlEncode(USERNAME)
+    if extraParams then
+        for k, v in pairs(extraParams) do
+            url = url .. "&" .. tostring(k) .. "=" .. HttpService:UrlEncode(tostring(v))
+        end
+    end
+    local ok, result = pcall(function()
+        return HttpService:GetAsync(url, true)
+    end)
+    if ok and result then
+        local ok2, data = pcall(function() return HttpService:JSONDecode(result) end)
+        if ok2 then return data end
+    end
+    return nil
+end
+
+local function apiPost(action, data)
+    local body = HttpService:JSONEncode(data)
+    local ok, result = pcall(function()
+        return HttpService:PostAsync(
+            API_URL .. "?action=" .. action,
+            body,
+            Enum.HttpContentType.ApplicationJson
+        )
+    end)
+    if ok and result then
+        local ok2, decoded = pcall(function() return HttpService:JSONDecode(result) end)
+        if ok2 then return decoded end
+    end
+    return nil
+end
+
+-- ============================================================
+-- AMBIL TRADE CONFIG DARI WEB
+-- ============================================================
+local function getTradeConfig()
+    local data = apiGet("get_trade_config")
+    if data and data.status == "ok" then
+        return {
+            auto_accept    = data.auto_accept == true,
+            selected_uuids = data.selected_uuids or {}
+        }
+    end
+    return { auto_accept = false, selected_uuids = {} }
+end
+
+-- ============================================================
+-- DUMP INVENTORY KE WEB
+-- ============================================================
+local function dumpInventory()
+    print("[AUTO TRADE] Memulai dump inventory ke web...")
+
+    local okReplion, Replion = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Replion"))
+    end)
+    local okItemUtil, ItemUtility = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemUtility"))
+    end)
+
+    if not okReplion or not okItemUtil then
+        warn("[AUTO TRADE] Gagal memuat modul untuk dump inventory")
+        return
+    end
+
+    local playerData = Replion.Client:WaitReplion("Data")
+    if not playerData then
+        warn("[AUTO TRADE] Gagal mendapatkan player data")
+        return
+    end
+
+    local inventory = playerData:Get("Inventory")
+    if not inventory then
+        warn("[AUTO TRADE] Inventory tidak ditemukan")
+        return
+    end
+
+    local items = {}
+
+    for categoryName, categoryItems in pairs(inventory) do
+        if type(categoryItems) == "table" then
+            for _, itemData in ipairs(categoryItems) do
+                if itemData and itemData.UUID then
+                    local okItem, itemInfo = pcall(function()
+                        return ItemUtility.GetItemDataFromItemType(categoryName, itemData.Id)
+                    end)
+                    if okItem and itemInfo and itemInfo.Data then
+                        local meta = itemData.Metadata or {}
+                        table.insert(items, {
+                            uuid        = tostring(itemData.UUID),
+                            id          = tostring(itemData.Id or ""),
+                            name        = tostring(itemInfo.Data.Name or "Unknown"),
+                            type        = tostring(itemInfo.Data.Type or categoryName),
+                            icon        = tostring(itemInfo.Data.Icon or ""),
+                            weight      = meta.Weight  and tonumber(meta.Weight)  or nil,
+                            mutation    = meta.Mutation and tostring(meta.Mutation) or nil,
+                            rarity      = tostring(itemInfo.Data.Rarity or "Common"),
+                            trade_locked = itemData.TradeLocked == true
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    print(string.format("[AUTO TRADE] Mengirim %d item ke web...", #items))
+    local res = apiPost("store_inventory", { username = USERNAME, items = items })
+    if res and res.status == "ok" then
+        print(string.format("[AUTO TRADE] âœ” Inventory berhasil dikirim! (%d item)", res.count or #items))
+    else
+        warn("[AUTO TRADE] âœ˜ Gagal mengirim inventory")
+    end
+end
+
+-- ============================================================
+-- COMMAND POLLER (selalu aktif, cek perintah dari web)
+-- ============================================================
+task.spawn(function()
+    while true do
+        task.wait(5)
+        local data = apiGet("get_lua_cmd")
+        if data and data.cmd == "dump_inventory" then
+            print("[AUTO TRADE] Menerima perintah dump_inventory dari web")
+            -- Ack dulu baru eksekusi (supaya tidak double-run)
+            apiPost("ack_lua_cmd", { username = USERNAME })
+            task.spawn(dumpInventory)
+        end
+    end
+end)
+
+-- ============================================================
+-- BYPASS PROMPT VISUAL (cegah popup Trade Request nyangkut)
+-- ============================================================
+local okPrompt, PromptController = pcall(function()
+    return require(ReplicatedStorage:WaitForChild("Controllers"):WaitForChild("PromptController"))
+end)
+local okPromise, Promise = pcall(function()
+    return require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Promise"))
+end)
+
+if okPrompt and PromptController and okPromise and Promise then
+    local oldFirePrompt = PromptController.FirePrompt
+    PromptController.FirePrompt = function(self, text, ...)
+        if type(text) == "string" and string.find(text, "Trade request") then
+            local config = getTradeConfig()
+            if config.auto_accept then
+                print("[AUTO TRADE] Prompt trade request â€” auto-accept (toggle ON)")
+                return Promise.resolve(true)
+            else
+                print("[AUTO TRADE] Prompt trade request â€” ditolak (toggle OFF)")
+            end
+        end
+        return oldFirePrompt(self, text, ...)
+    end
+    print("[âœ”] PromptController hook aktif!")
+end
+
+-- ============================================================
+-- LOAD TRADE MODULES
+-- ============================================================
+local okTradeData, TradeData = pcall(function()
+    return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Trading"):WaitForChild("TradeData"))
+end)
+
+if not okTradeData or not TradeData or not TradeData.Remotes then
+    warn("[AUTO TRADE] Gagal memuat TradeData!")
+    return
+end
+
+local Remotes = TradeData.Remotes
+local Replion = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Replion"))
+local ItemUtility = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemUtility"))
+
+-- ============================================================
+-- HANDLER: TRADE REQUEST DITERIMA
+-- ============================================================
+if Remotes.TradeOfferReceived then
+    Remotes.TradeOfferReceived.OnClientEvent:Connect(function(sender)
+        local config = getTradeConfig()
+        local senderName = tostring(sender)
+        print("[AUTO TRADE] Trade request dari: " .. senderName .. " | Auto Accept: " .. tostring(config.auto_accept))
+
+        -- Laporkan ke web
+        apiPost("update_trade_status", {
+            username  = USERNAME,
+            status    = "request_pending",
+            requester = senderName
+        })
+
+        if config.auto_accept then
+            pcall(function()
+                Remotes.AcceptTradeOffer:InvokeServer(sender)
+            end)
+        end
+    end)
+end
+
+-- ============================================================
+-- HANDLER: SESI TRADE DIMULAI
+-- ============================================================
+if Remotes.TradeStarted then
+    Remotes.TradeStarted.OnClientEvent:Connect(function(sessionId)
+        -- Cek toggle
+        local config = getTradeConfig()
+        if not config.auto_accept then
+            print("[AUTO TRADE] Trade session aktif tapi toggle OFF â€” skip.")
+            apiPost("update_trade_status", { username = USERNAME, status = "idle", requester = "" })
+            return
+        end
+
+        print("[AUTO TRADE] Sesi trade terbuka. SessionID: " .. tostring(sessionId))
+        apiPost("update_trade_status", { username = USERNAME, status = "in_trade", requester = "" })
+
+        task.spawn(function()
+            task.wait(0.6)
+
+            local sessionReplion = Replion.Client:WaitReplion(sessionId)
+            local playerData     = Replion.Client:WaitReplion("Data")
+
+            if not playerData then
+                warn("[AUTO TRADE] Gagal membaca Player Data.")
+                apiPost("update_trade_status", { username = USERNAME, status = "idle", requester = "" })
+                return
+            end
+
+            local inventory = playerData:Get("Inventory")
+            if not inventory then
+                warn("[AUTO TRADE] Inventory tidak ditemukan.")
+                apiPost("update_trade_status", { username = USERNAME, status = "idle", requester = "" })
+                return
+            end
+
+            -- Build lookup: UUID â†’ {Type, UUID}
+            local tradableByUUID = {}
+            local allTradable    = {}
+
+            for categoryName, categoryItems in pairs(inventory) do
+                if type(categoryItems) == "table" then
+                    for _, itemData in ipairs(categoryItems) do
+                        if itemData and itemData.UUID and not itemData.TradeLocked then
+                            local okItem, itemInfo = pcall(function()
+                                return ItemUtility.GetItemDataFromItemType(categoryName, itemData.Id)
+                            end)
+                            if okItem and itemInfo and itemInfo.Data and itemInfo.Data.Type then
+                                local itemType = itemInfo.Data.Type
+                                if TradeData.FollowTradeRules(itemInfo, itemData) then
+                                    local entry = { Type = itemType, UUID = itemData.UUID }
+                                    tradableByUUID[itemData.UUID] = entry
+                                    table.insert(allTradable, entry)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Tentukan item yang mau di-trade
+            local chosenItems    = {}
+            local selectedUUIDs  = config.selected_uuids or {}
+            local MAX_ITEMS      = 20  -- Batas maksimum game
+
+            if #selectedUUIDs > 0 then
+                -- Prioritas: item yang dipilih dari web
+                for _, uuid in ipairs(selectedUUIDs) do
+                    if tradableByUUID[uuid] then
+                        table.insert(chosenItems, tradableByUUID[uuid])
+                        if #chosenItems >= MAX_ITEMS then break end
+                    end
+                end
+                print(string.format("[AUTO TRADE] Menggunakan %d item dari pilihan web", #chosenItems))
+            end
+
+            -- Fallback: jika tidak ada pilihan web yang valid, pakai semua tradable
+            if #chosenItems == 0 then
+                for i = 1, math.min(MAX_ITEMS, #allTradable) do
+                    table.insert(chosenItems, allTradable[i])
+                end
+                print(string.format("[AUTO TRADE] Fallback: menggunakan %d item pertama", #chosenItems))
+            end
+
+            if #chosenItems == 0 then
+                warn("[AUTO TRADE] Tidak ada item tradable yang valid!")
+                apiPost("update_trade_status", { username = USERNAME, status = "idle", requester = "" })
+                return
+            end
+
+            -- Tambahkan item ke trade
+            print(string.format("[AUTO TRADE] Memasukkan %d item ke trade...", #chosenItems))
+            for _, item in ipairs(chosenItems) do
+                local okAdd, errAdd = pcall(function()
+                    return Remotes.AddItem:InvokeServer(item.Type, item.UUID)
+                end)
+                if okAdd then
+                    print("[AUTO TRADE] âœ” Berhasil: " .. item.UUID)
+                else
+                    warn("[AUTO TRADE] âœ˜ Gagal: " .. tostring(errAdd))
+                end
+                task.wait(0.15)
+            end
+
+            -- Kirim sinyal Ready
+            print("[AUTO TRADE] Mengirim sinyal Ready...")
+            task.wait(0.4)
+            pcall(function() Remotes.SetReady:InvokeServer(true) end)
+
+            -- Tunggu PlayersReady dari akun utama
+            print("[AUTO TRADE] Menunggu akun utama siap (PlayersReady)...")
+            local startTime = tick()
+            while task.wait(0.1) do
+                if tick() - startTime > 35 then
+                    print("[AUTO TRADE] Timeout menunggu PlayersReady.")
+                    break
+                end
+                local okCheck, isReady = pcall(function()
+                    return sessionReplion and sessionReplion.Data and sessionReplion.Data.PlayersReady
+                end)
+                if okCheck and isReady == true then
+                    print("[AUTO TRADE] Akun utama sudah Ready!")
+                    break
+                end
+            end
+
+            -- Konfirmasi trade
+            print("[AUTO TRADE] Mengirim ConfirmTrade...")
+            task.wait(0.4)
+            pcall(function() Remotes.ConfirmTrade:InvokeServer() end)
+
+            print("[ðŸŽ‰] Trade selesai! Akun: " .. USERNAME)
+
+            -- Update status web
+            task.wait(2)
+            apiPost("update_trade_status", { username = USERNAME, status = "done", requester = "" })
+            task.wait(4)
+            apiPost("update_trade_status", { username = USERNAME, status = "idle", requester = "" })
+        end)
+    end)
+end
+
+print("[âœ”] Auto Trade Bot v2.0 aktif! Username: " .. USERNAME)
