@@ -1,0 +1,228 @@
+local Players = service_or_player_placeholder and game:GetService("Players") or game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+
+if PlayerGui:FindFirstChild("StarMachineModernUI") then
+    PlayerGui.StarMachineModernUI:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "StarMachineModernUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = PlayerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 220, 0, 105)
+mainFrame.Position = UDim2.new(0.5, -110, 0.15, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+mainFrame.BackgroundTransparency = 0.25
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 10)
+uiCorner.Parent = mainFrame
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = Color3.fromRGB(70, 60, 120)
+uiStroke.Thickness = 1.2
+uiStroke.Parent = mainFrame
+
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 32)
+header.BackgroundTransparency = 1
+header.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -40, 1, 0)
+titleLabel.Position = UDim2.new(0, 12, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Auto Star Machine"
+titleLabel.TextColor3 = Color3.fromRGB(220, 220, 240)
+titleLabel.TextSize = 12
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = header
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 24, 0, 24)
+minBtn.Position = UDim2.new(1, -28, 0, 4)
+minBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+minBtn.BackgroundTransparency = 0.5
+minBtn.Text = "-"
+minBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+minBtn.TextSize = 14
+minBtn.Font = Enum.Font.GothamBold
+minBtn.Parent = header
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minBtn
+
+local body = Instance.new("Frame")
+body.Size = UDim2.new(1, 0, 0, 73)
+body.Position = UDim2.new(0, 0, 0, 32)
+body.BackgroundTransparency = 1
+body.ClipsDescendants = true
+body.Parent = mainFrame
+
+local timeLabel = Instance.new("TextLabel")
+timeLabel.Size = UDim2.new(1, 0, 0, 22)
+timeLabel.Position = UDim2.new(0, 0, 0, 4)
+timeLabel.BackgroundTransparency = 1
+timeLabel.Text = "Time Left: Loading..."
+timeLabel.TextColor3 = Color3.fromRGB(160, 220, 180)
+timeLabel.TextSize = 11
+timeLabel.Font = Enum.Font.GothamMedium
+timeLabel.Parent = body
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0.9, 0, 0, 32)
+toggleBtn.Position = UDim2.new(0.05, 0, 0, 32)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 48)
+toggleBtn.Text = "Auto Deposit: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(240, 100, 100)
+toggleBtn.TextSize = 11
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.Parent = body
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 8)
+btnCorner.Parent = toggleBtn
+
+local dragging, dragInput, dragStart, startPos
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+header.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    
+    if minimized then
+        minBtn.Text = "+"
+        TweenService:Create(body, tweenInfo, {Size = UDim2.new(1, 0, 0, 0)}):Play()
+        TweenService:Create(mainFrame, tweenInfo, {Size = UDim2.new(0, 220, 0, 32)}):Play()
+    else
+        minBtn.Text = "-"
+        TweenService:Create(body, tweenInfo, {Size = UDim2.new(1, 0, 0, 73)}):Play()
+        TweenService:Create(mainFrame, tweenInfo, {Size = UDim2.new(0, 220, 0, 105)}):Play()
+    end
+end)
+
+local autoActive = false
+toggleBtn.MouseButton1Click:Connect(function()
+    autoActive = not autoActive
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    
+    if autoActive then
+        TweenService:Create(toggleBtn, tweenInfo, {BackgroundColor3 = Color3.fromRGB(45, 140, 75)}):Play()
+        toggleBtn.Text = "Auto Deposit: ON"
+        toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        TweenService:Create(toggleBtn, tweenInfo, {BackgroundColor3 = Color3.fromRGB(35, 35, 48)}):Play()
+        toggleBtn.Text = "Auto Deposit: OFF"
+        toggleBtn.TextColor3 = Color3.fromRGB(240, 100, 100)
+    end
+end)
+
+task.spawn(function()
+    local successReplion, Replion = pcall(function() return require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Replion")) end)
+    local successConfig, StarConfig = pcall(function() return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("StarMachineConfig")) end)
+    
+    if not successReplion or not successConfig then
+        timeLabel.Text = "Status: Error Config"
+        return
+    end
+
+    local machineData = Replion.Client:WaitReplion(StarConfig.Channel)
+    
+    while true do
+        local activeEndsAt = machineData:Get("ActiveEndsAt") or 0
+        local serverTime = workspace:GetServerTimeNow()
+        local timeLeft = activeEndsAt - serverTime
+        
+        if timeLeft > 0 then
+            local hours = math.floor(timeLeft / 3600)
+            local minutes = math.floor((timeLeft % 3600) / 60)
+            local seconds = math.floor(timeLeft % 60)
+            
+            if hours > 0 then
+                timeLabel.Text = string.format("Time Left: %d:%02d:%02d", hours, minutes, seconds)
+            else
+                timeLabel.Text = string.format("Time Left: %02d:%02d", minutes, seconds)
+            end
+            timeLabel.TextColor3 = Color3.fromRGB(160, 220, 180)
+        else
+            timeLabel.Text = "Status: Expired / Ready"
+            timeLabel.TextColor3 = Color3.fromRGB(240, 100, 100)
+        end
+        
+        if autoActive and timeLeft <= 0 then
+            local machines = CollectionService:GetTagged(StarConfig.MachineTag)
+            if #machines > 0 then
+                local machine = machines[1]
+                local promptPart = machine:FindFirstChild(StarConfig.Assets.PromptPart) or machine:FindFirstChild("PromptPart")
+                
+                if promptPart then
+                    local prompt = promptPart:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then
+                        local char = LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        
+                        if hrp then
+                            local originalCFrame = hrp.CFrame
+                            
+                            hrp.CFrame = promptPart.CFrame + Vector3.new(0, 3, 2)
+                            task.wait(1.0)
+                            
+                            for i = 1, 3 do
+                                local chargeFragments = machineData:Get("ChargeFragments") or 0
+                                if chargeFragments >= StarConfig.ActivationFragmentCost then
+                                    break
+                                end
+                                
+                                fireproximityprompt(prompt)
+                                task.wait(0.7)
+                            end
+                            
+                            task.wait(0.5)
+                            hrp.CFrame = originalCFrame
+                            task.wait(10)
+                        end
+                    end
+                end
+            end
+        end
+        
+        task.wait(1)
+    end
+end)
