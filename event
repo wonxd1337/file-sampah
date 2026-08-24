@@ -1,0 +1,238 @@
+-- ==========================================
+-- SCRIPT: AUTO EVENT TELEPORT & UI COMPLETE
+-- ==========================================
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+local EventSpots = {
+    ["Blizzard Elemental Event"] = CFrame.new(-1095.28857, 142.093246, 5595.75391, 0.562535286, 3.58400847e-08, -0.826773286, -2.12463931e-08, 1, 2.88933357e-08, 0.826773286, 1.31242883e-09, 0.562535286),
+    ["Storm Elemental Event"]    = CFrame.new(-859.987, 56.0566597, 5311.89795, -0.579480529, -1.11835895e-07, 0.81498605, -6.81041641e-08, 1, 8.8800121e-08, -0.81498605, -4.04600309e-09, -0.579480529),
+    ["Volcano Elemental Event"]  = CFrame.new(-820.79303, 59.3692894, 5289.58398, -0.405911922, -7.26389189e-08, -0.913912177, -2.70886211e-08, 1, -6.74499461e-08, 0.913912177, -2.62211475e-09, -0.405911922)
+}
+
+-- ==========================================
+-- MEMBUAT TAMPILAN UI
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "EventTeleportUI"
+screenGui.ResetOnSpawn = false
+
+pcall(function()
+    screenGui.Parent = CoreGui
+end)
+if not screenGui.Parent then
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 200, 0, 80)
+mainFrame.Position = UDim2.new(0.5, -100, 0.15, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+mainFrame.BackgroundTransparency = 0.35
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 6)
+mainCorner.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(0, 120, 0, 28)
+titleLabel.Position = UDim2.new(0, 8, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Text = "Event Teleport"
+titleLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+titleLabel.TextSize = 12
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = mainFrame
+
+-- Tombol Close (X)
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 20, 0, 20)
+closeButton.Position = UDim2.new(1, -24, 0, 4)
+closeButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 10
+closeButton.Parent = mainFrame
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 3)
+closeCorner.Parent = closeButton
+
+-- Tombol Minimize (-)
+local minButton = Instance.new("TextButton")
+minButton.Size = UDim2.new(0, 20, 0, 20)
+minButton.Position = UDim2.new(1, -48, 0, 4)
+minButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+minButton.BorderSizePixel = 0
+minButton.Font = Enum.Font.GothamBold
+minButton.Text = "-"
+minButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minButton.TextSize = 12
+minButton.Parent = mainFrame
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 3)
+minCorner.Parent = minButton
+
+-- Tombol Toggle Status (Default ON)
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.88, 0, 0, 34)
+toggleButton.Position = UDim2.new(0.06, 0, 0, 36)
+toggleButton.BackgroundColor3 = Color3.fromRGB(0, 100, 50)
+toggleButton.BorderSizePixel = 0
+toggleButton.Font = Enum.Font.GothamMedium
+toggleButton.Text = "Status: ON"
+toggleButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+toggleButton.TextSize = 11
+toggleButton.Parent = mainFrame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 4)
+btnCorner.Parent = toggleButton
+
+-- ==========================================
+-- FUNGSI MINIMIZE & CLOSE
+-- ==========================================
+local isMinimized = false
+
+minButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        mainFrame.Size = UDim2.new(0, 200, 0, 28)
+        toggleButton.Visible = false
+        minButton.Text = "+"
+    else
+        mainFrame.Size = UDim2.new(0, 200, 0, 80)
+        toggleButton.Visible = true
+        minButton.Text = "-"
+    end
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+    RunService:Set3dRenderingEnabled(true)
+    screenGui:Destroy()
+end)
+
+-- ==========================================
+-- FUNGSI DRAGGABLE (BISA DIGESER)
+-- ==========================================
+local dragging, dragInput, dragStart, startPos
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale, 
+            startPos.X.Offset + delta.X, 
+            startPos.Y.Scale, 
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- ==========================================
+-- LOGIKA TOMBOL TOGGLE (DEFAULT ON)
+-- ==========================================
+local scriptEnabled = true
+
+toggleButton.MouseButton1Click:Connect(function()
+    scriptEnabled = not scriptEnabled
+    if scriptEnabled then
+        toggleButton.Text = "Status: ON"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 100, 50)
+    else
+        toggleButton.Text = "Status: OFF"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        RunService:Set3dRenderingEnabled(true)
+    end
+end)
+
+-- ==========================================
+-- LOGIKA UTAMA MONITOR EVENT & TELEPORT
+-- ==========================================
+local success, Replion = pcall(function()
+    return require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Replion"))
+end)
+
+if success and Replion then
+    local serverBrowserReplion = Replion.Client:WaitReplion("ServerBrowser")
+    local lastTeleportedEvent = nil
+    local savedReturnPosition = nil
+
+    task.spawn(function()
+        while true do
+            if not scriptEnabled then
+                task.wait(1)
+            else
+                pcall(function()
+                    if serverBrowserReplion and serverBrowserReplion.Data and serverBrowserReplion.Data.Servers then
+                        local currentServerData = serverBrowserReplion.Data.Servers[game.JobId]
+                        
+                        if currentServerData and currentServerData.Events and type(currentServerData.Events) == "table" then
+                            local eventFound = false
+                            
+                            for _, activeEvent in ipairs(currentServerData.Events) do
+                                if EventSpots[activeEvent] then
+                                    eventFound = true
+                                    if lastTeleportedEvent ~= activeEvent then
+                                        local character = LocalPlayer.Character
+                                        if character and character:FindFirstChild("HumanoidRootPart") then
+                                            if not savedReturnPosition then
+                                                savedReturnPosition = character.HumanoidRootPart.CFrame
+                                            end
+                                            RunService:Set3dRenderingEnabled(false)
+                                            character.HumanoidRootPart.CFrame = EventSpots[activeEvent]
+                                            lastTeleportedEvent = activeEvent
+                                        end
+                                    end
+                                    break
+                                end
+                            end
+                            
+                            if not eventFound and lastTeleportedEvent ~= nil then
+                                local character = LocalPlayer.Character
+                                if character and character:FindFirstChild("HumanoidRootPart") and savedReturnPosition then
+                                    character.HumanoidRootPart.CFrame = savedReturnPosition
+                                end
+                                RunService:Set3dRenderingEnabled(true)
+                                lastTeleportedEvent = nil
+                                savedReturnPosition = nil
+                            end
+                        end
+                    end
+                end)
+                task.wait(5)
+            end
+        end
+    end)
+end
