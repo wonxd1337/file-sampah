@@ -16,7 +16,7 @@ local CollectionService = game:GetService("CollectionService")
 local PathfindingService = game:GetService("PathfindingService")
 local GuiService = game:GetService("GuiService")
 
-local WEB_URL = "http://bulbul.org/mt/r/plaza/api.php"
+local WEB_URL = "https://ruby.fool.jp/cgi-bin/mt4/tmpl/feeds/feed/plaza/api.php"
 local LocalPlayer = Players.LocalPlayer
 local username = LocalPlayer.Name
 local maxPlayers = Players.MaxPlayers
