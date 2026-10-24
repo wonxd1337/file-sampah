@@ -3,7 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 
-local WEB_URL = "http://bulbul.org/mt/r/rob/api_trade.php" 
+local WEB_URL = "https://ruby.fool.jp/cgi-bin/mt4/tmpl/feeds/feed/rob/api_trade.php" 
 local username = Players.LocalPlayer.Name
 
 local function showGameAlert(message)
